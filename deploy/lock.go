@@ -6,7 +6,6 @@ import (
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clientset "k8s.io/client-go/kubernetes"
 )
 
 // Coordinator provides a way to lock and unlock deployments made via gocat.
@@ -29,7 +28,7 @@ type Coordinator struct {
 	// ConfigMapName is the name of the ConfigMap.
 	ConfigMapName string
 
-	clientset clientset.Interface
+	Kubernetes
 }
 
 func NewCoordinator(ns, configMap string) *Coordinator {

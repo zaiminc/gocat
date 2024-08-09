@@ -36,13 +36,18 @@ type GitHubInput struct {
 	Branch     string
 }
 
-func CreateGitHubInstance(token, org, repo, defaultBranch string) GitHub {
+func CreateGitHubInstance(url, token, org, repo, defaultBranch string) GitHub {
 	src := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: token},
 	)
 	httpClient := oauth2.NewClient(context.Background(), src)
 
-	client := githubv4.NewClient(httpClient)
+	var client *githubv4.Client
+	if url != "" {
+		client = githubv4.NewEnterpriseClient(url, httpClient)
+	} else {
+		client = githubv4.NewClient(httpClient)
+	}
 	return GitHub{*client, httpClient, org, repo, defaultBranch}
 }
 

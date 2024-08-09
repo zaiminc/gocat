@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/slack-go/slack"
 )
@@ -19,7 +20,7 @@ func main() {
 		config.SlackOAuthToken,
 		slack.OptionLog(log.New(os.Stdout, "slack-bot: ", log.Lshortfile|log.LstdFlags)),
 	)
-	github := CreateGitHubInstance(config.GitHubAccessToken, config.ManifestRepositoryOrg, config.ManifestRepositoryName, config.GitHubDefaultBranch)
+	github := CreateGitHubInstance("", config.GitHubAccessToken, config.ManifestRepositoryOrg, config.ManifestRepositoryName, config.GitHubDefaultBranch)
 	git := CreateGitOperatorInstance(
 		config.GitHubUserName,
 		config.GitHubAccessToken,
@@ -44,6 +45,7 @@ func main() {
 		projectList:       &projectList,
 		userList:          &userList,
 		interactorFactory: &interactorFactory,
+		mu:                &sync.Mutex{},
 	})
 	http.Handle("/interaction", interactionHandler{
 		verificationToken: config.SlackVerificationToken,

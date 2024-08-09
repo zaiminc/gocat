@@ -34,6 +34,10 @@ type DeployPhase struct {
 	Destination   Destination `yaml:"destination"`
 }
 
+func (p DeployPhase) None() bool {
+	return p.Name == ""
+}
+
 type DeployProject struct {
 	// ID is the name of the configmap that defines the project.
 	ID                  string

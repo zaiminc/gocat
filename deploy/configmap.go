@@ -72,7 +72,7 @@ func (c *Coordinator) getOrCreateConfigMap(ctx context.Context) (*corev1.ConfigM
 
 // getConfigMap creates a Kubernetes API client, and use it to retrieve the ConfigMap.
 func (c *Coordinator) getConfigMap(ctx context.Context) (*corev1.ConfigMap, error) {
-	clientset, err := c.kubernetesClientSet()
+	clientset, err := c.ClientSet()
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (c *Coordinator) getConfigMap(ctx context.Context) (*corev1.ConfigMap, erro
 }
 
 func (c *Coordinator) createConfigMap(ctx context.Context) (*corev1.ConfigMap, error) {
-	clientset, err := c.kubernetesClientSet()
+	clientset, err := c.ClientSet()
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (c *Coordinator) createConfigMap(ctx context.Context) (*corev1.ConfigMap, e
 }
 
 func (c *Coordinator) updateConfigMap(ctx context.Context, configMap *corev1.ConfigMap) (*corev1.ConfigMap, error) {
-	clientset, err := c.kubernetesClientSet()
+	clientset, err := c.ClientSet()
 	if err != nil {
 		return nil, err
 	}

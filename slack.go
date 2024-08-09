@@ -2,16 +2,20 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
+	"github.com/zaiminc/gocat/deploy"
 	"github.com/zaiminc/gocat/slackcmd"
 )
 
@@ -23,6 +27,9 @@ type SlackListener struct {
 	projectList       *ProjectList
 	userList          *UserList
 	interactorFactory *InteractorFactory
+
+	coordinator *deploy.Coordinator
+	mu          *sync.Mutex
 }
 
 func (s SlackListener) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -182,8 +189,7 @@ func (s *SlackListener) handleMessageEvent(ev *slackevents.AppMentionEvent) erro
 	}
 	if cmd, _ := slackcmd.Parse(ev.Text); cmd != nil {
 		log.Printf("[INFO] %s command is Called", cmd.Name())
-		// TODO run the command and post the result to slack
-		return nil
+		return s.runCommand(cmd, ev.User, ev.Channel)
 	}
 	return nil
 }
@@ -245,6 +251,101 @@ func createDeployButtonSection(pj DeployProject, phaseName string) *slack.Sectio
 	btn := slack.NewButtonBlockElement("", fmt.Sprintf("deploy_%s_%s|%s_%s", phase.Kind, action, pj.ID, phase.Name), btnTxt)
 	section := slack.NewSectionBlock(txt, nil, slack.NewAccessory(btn))
 	return section
+}
+
+// runCommand runs the given command.
+//
+// triggeredBy is the ID of the Slack user who triggered the command,
+// and replyIn is the ID of the Slack channel to reply to.
+func (s *SlackListener) runCommand(cmd slackcmd.Command, triggeredBy string, replyIn string) error {
+	var msgOpt slack.MsgOption
+
+	switch cmd := cmd.(type) {
+	case *slackcmd.Lock:
+		msgOpt = s.lock(cmd, triggeredBy, replyIn)
+	case *slackcmd.Unlock:
+		msgOpt = s.unlock(cmd, triggeredBy, replyIn, false)
+	default:
+		panic("unreachable")
+	}
+
+	if _, _, err := s.client.PostMessage(replyIn, msgOpt); err != nil {
+		log.Println("[ERROR] ", err)
+	}
+
+	return nil
+}
+
+// lock locks the given project and environment, and replies to the given channel.
+func (s *SlackListener) lock(cmd *slackcmd.Lock, triggeredBy string, replyIn string) slack.MsgOption {
+	if err := s.validateProjectEnvUser(cmd.Project, cmd.Env, triggeredBy, replyIn); err != nil {
+		return s.errorMessage(err.Error())
+	}
+
+	if err := s.getOrCreateCoordinator().Lock(context.Background(), cmd.Project, cmd.Env, triggeredBy, cmd.Reason); err != nil {
+		return s.errorMessage(err.Error())
+	}
+
+	return s.infoMessage(fmt.Sprintf("Locked %s %s", cmd.Project, cmd.Env))
+}
+
+// unlock unlocks the given project and environment, and replies to the given channel.
+func (s *SlackListener) unlock(cmd *slackcmd.Unlock, triggeredBy string, replyIn string, force bool) slack.MsgOption {
+	if err := s.validateProjectEnvUser(cmd.Project, cmd.Env, triggeredBy, replyIn); err != nil {
+		return s.errorMessage(err.Error())
+	}
+
+	if err := s.getOrCreateCoordinator().Unlock(context.Background(), cmd.Project, cmd.Env, triggeredBy, force); err != nil {
+		return s.errorMessage(err.Error())
+	}
+
+	return s.infoMessage(fmt.Sprintf("Unlocked %s %s", cmd.Project, cmd.Env))
+}
+
+func (s *SlackListener) validateProjectEnvUser(projectID, env, userID, replyIn string) error {
+	pj, err := s.projectList.FindByAlias(projectID)
+	if err != nil {
+		log.Println("[ERROR] ", err)
+		if _, _, err := s.client.PostMessage(replyIn, s.errorMessage(err.Error())); err != nil {
+			log.Println("[ERROR] ", err)
+		}
+		return fmt.Errorf("find by alias %q: %w", projectID, err)
+	}
+
+	if phase := pj.FindPhase(env); phase.None() {
+		err = fmt.Errorf("phase %s is not found", env)
+		log.Println("[ERROR] ", err)
+		if _, _, err := s.client.PostMessage(replyIn, s.errorMessage(err.Error())); err != nil {
+			log.Println("[ERROR] ", err)
+		}
+		return fmt.Errorf("find phase %q: %w", env, err)
+	}
+
+	if user := s.userList.FindBySlackUserID(userID); !user.IsDeveloper() {
+		err = errors.New("you are not allowed to lock this project")
+		log.Println("[ERROR] ", err)
+		if _, _, err := s.client.PostMessage(replyIn, s.errorMessage(err.Error())); err != nil {
+			log.Println("[ERROR] ", err)
+		}
+		return fmt.Errorf("find by slack user id %q: %w", userID, err)
+	}
+
+	return nil
+}
+
+func (s *SlackListener) getOrCreateCoordinator() *deploy.Coordinator {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.coordinator == nil {
+		s.coordinator = deploy.NewCoordinator("gocat", "deploylocks")
+	}
+	return s.coordinator
+}
+
+func (s *SlackListener) infoMessage(message string) slack.MsgOption {
+	txt := slack.NewTextBlockObject("mrkdwn", message, false, false)
+	section := slack.NewSectionBlock(txt, nil, nil)
+	return slack.MsgOptionBlocks(section)
 }
 
 func (s *SlackListener) errorMessage(message string) slack.MsgOption {
